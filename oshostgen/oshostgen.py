@@ -1,11 +1,9 @@
 import argparse
 import lib.Tools
-import threading
 import sys
 import openstack
 import os
-import json
-from collections import deque
+
 
 class MyParser(argparse.ArgumentParser):
     def error(self, message):
@@ -13,14 +11,19 @@ class MyParser(argparse.ArgumentParser):
         self.print_help()
         sys.exit(2)
 
-parser = MyParser(description=' \
+
+parser = MyParser(description='A Ansible hostfile generator for \
                                large OpenStack deployments')
 
 parser.add_argument('-n', '--no-touch', dest='no_touch', action="store_true",
                     help="Don't load a key")
 
 parser.add_argument('-k', '--keyfile', dest='keyfile', type=str,
-                    default = "$HOME/id_rsa", help="Keyfile to load")
+                    default="$HOME/.ssh/id_rsa", help="Keyfile to load")
+
+parser.add_argument('-b', '--browbeat', dest='browbeat',
+                    type=str, default=None,
+                    help="Browbeat mode. Usage: -b <browbeat machine ip>")
 
 args = parser.parse_args()
 
@@ -37,20 +40,17 @@ auth_args = {
 }
 
 
+conn = openstack.connection.Connection(**auth_args)
+if not lib.Tools.add_key(args.keyfile, conn):
+    print("There are no keys in Nova, please add one")
+    exit(1)
 
-def main():
-        conn = openstack.connection.Connection(**auth_args)
-        # Issue one thread for each node
-        if not no_touch:
-            lib.Tools.add_key(keypair, conn)
+with open("ssh-config", 'w') as ssh_conf:
+    lines = lib.Tools.build_ssh_config(conn, args)
+    for line in lines:
+        ssh_conf.write(line)
 
-        threads = []
-        nodes = deque()
-        for server in conn.compute.servers():
-            thread = threading.Thread(target=lib.Tools.identify_node, args=(server, conn))
-            threads.append(thread)
-            thread.start()
-            for thread in threads:
-                thread.join()
-
-        #come back from the threads, take the deque they built and make a hosts/ssh-config with it
+with open("hosts", 'w') as hosts_file:
+    lines = lib.Tools.build_ansible_host_file(conn, args)
+    for line in lines:
+        hosts_file.write(line)
